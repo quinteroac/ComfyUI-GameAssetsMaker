@@ -76,6 +76,8 @@ SPINE_EXPORT_VERSION = "spine-export-v4-minimal-control-bones"
 SPINE_ANIMATION_PRESETS = ["all", "full_idle", "idle_breath", "blink", "hair_sway", "face_alive", "no_animations"]
 SPINE_CONTROL_BONE_ROLES = {"clothing", "torso", "head", "hair", "iris", "eyelash"}
 SPINE_POINT_CONTROL_ROLES = {"hair", "iris", "eyelash"}
+ASEPRITE_SPRITESHEET_TYPES = ["Half Body", "Full Body", "Face Expressions"]
+ASEPRITE_EXPORT_VERSION = "aseprite-atlas-v1"
 
 SIDE_WORDS = {
     "left": ["left", "l", "lt", "lhs", "izq", "izquierda"],
@@ -125,6 +127,112 @@ def _format_number(value):
     if abs(value - round(value)) < 1e-6:
         return str(int(round(value)))
     return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def _safe_filename_stem(value, fallback="sprite"):
+    text = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(value or "")).strip("_.-")
+    return text or fallback
+
+
+def _parse_sprite_names(sprite_names, sprite_count):
+    if isinstance(sprite_names, (list, tuple)):
+        names = [str(name).strip() for name in sprite_names]
+    else:
+        text = str(sprite_names or "").strip()
+        names = []
+        if text:
+            try:
+                loaded = json.loads(text)
+                if isinstance(loaded, list):
+                    names = [str(name).strip() for name in loaded]
+                elif isinstance(loaded, dict):
+                    names = [str(loaded.get(str(index + 1), "")).strip() for index in range(sprite_count)]
+            except json.JSONDecodeError:
+                names = [line.strip() for line in text.splitlines()]
+
+    normalized = []
+    used = set()
+    for index in range(sprite_count):
+        name = names[index] if index < len(names) and names[index] else f"sprite_{index + 1:02d}"
+        base = _safe_filename_stem(name, f"sprite_{index + 1:02d}")
+        unique = base
+        suffix = 2
+        while unique in used:
+            unique = f"{base}_{suffix}"
+            suffix += 1
+        used.add(unique)
+        normalized.append(unique)
+    return normalized
+
+
+def _build_aseprite_atlas(
+    sheet_width,
+    sheet_height,
+    spritesheet_type,
+    sprite_count,
+    sprite_names,
+    columns,
+    image_filename,
+    frame_duration,
+):
+    sheet_width = int(sheet_width)
+    sheet_height = int(sheet_height)
+    sprite_count = int(sprite_count)
+    columns = int(columns)
+
+    if sheet_width <= 0 or sheet_height <= 0:
+        raise ValueError("Spritesheet width and height must be greater than zero")
+    if sprite_count <= 0:
+        raise ValueError("Sprite count must be greater than zero")
+    if columns <= 0:
+        columns = sprite_count
+    if columns > sprite_count:
+        columns = sprite_count
+
+    rows = int(math.ceil(sprite_count / columns))
+    if sheet_width % columns != 0:
+        raise ValueError(f"Spritesheet width {sheet_width} is not divisible by columns {columns}")
+    if sheet_height % rows != 0:
+        raise ValueError(f"Spritesheet height {sheet_height} is not divisible by calculated rows {rows}")
+
+    frame_width = sheet_width // columns
+    frame_height = sheet_height // rows
+    names = _parse_sprite_names(sprite_names, sprite_count)
+    frames = {}
+
+    for index, name in enumerate(names):
+        col = index % columns
+        row = index // columns
+        frame_key = f"{name}.png"
+        frames[frame_key] = {
+            "frame": {"x": col * frame_width, "y": row * frame_height, "w": frame_width, "h": frame_height},
+            "rotated": False,
+            "trimmed": False,
+            "spriteSourceSize": {"x": 0, "y": 0, "w": frame_width, "h": frame_height},
+            "sourceSize": {"w": frame_width, "h": frame_height},
+            "duration": int(frame_duration),
+        }
+
+    atlas = {
+        "frames": frames,
+        "meta": {
+            "app": "ComfyUI Game Assets Maker",
+            "version": ASEPRITE_EXPORT_VERSION,
+            "image": str(image_filename or "spritesheet.png"),
+            "format": "RGBA8888",
+            "size": {"w": sheet_width, "h": sheet_height},
+            "scale": "1",
+            "spritesheetType": spritesheet_type,
+            "layout": {
+                "columns": columns,
+                "rows": rows,
+                "spriteCount": sprite_count,
+                "frameWidth": frame_width,
+                "frameHeight": frame_height,
+            },
+        },
+    }
+    return atlas
 
 
 def _contour_to_path(contour, offset_x, offset_y, close_path=True):
@@ -1612,6 +1720,96 @@ class GameAssets_RigToSVGPreview:
         return (svg_output, svg)
 
 
+class GameAssets_AsepriteVisualNovelAtlas:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "sheet_width": ("INT", {"default": 2048, "min": 1, "max": 65536, "step": 1}),
+                "sheet_height": ("INT", {"default": 2048, "min": 1, "max": 65536, "step": 1}),
+                "spritesheet_type": (ASEPRITE_SPRITESHEET_TYPES, {"default": "Half Body"}),
+                "sprite_count": ("INT", {"default": 4, "min": 1, "max": 128, "step": 1}),
+                "columns": ("INT", {"default": 0, "min": 0, "max": 128, "step": 1}),
+                "sprite_names": (
+                    "STRING",
+                    {
+                        "default": '["neutral", "happy", "sad", "angry"]',
+                    },
+                ),
+                "image_filename": ("STRING", {"default": "visual_novel_character.png"}),
+                "frame_duration": ("INT", {"default": 100, "min": 1, "max": 60000, "step": 1}),
+                "save_json": ("BOOLEAN", {"default": True}),
+                "filename_prefix": ("STRING", {"default": "vn_character_atlas"}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("aseprite_json", "json_path", "report")
+    FUNCTION = "generate"
+    CATEGORY = "Game Assets/Aseprite"
+    OUTPUT_NODE = True
+
+    @classmethod
+    def IS_CHANGED(cls, *args, **kwargs):
+        return ASEPRITE_EXPORT_VERSION
+
+    def generate(
+        self,
+        sheet_width=2048,
+        sheet_height=2048,
+        spritesheet_type="Half Body",
+        sprite_count=4,
+        columns=0,
+        sprite_names='["neutral", "happy", "sad", "angry"]',
+        image_filename="visual_novel_character.png",
+        frame_duration=100,
+        save_json=True,
+        filename_prefix="vn_character_atlas",
+    ):
+        atlas = _build_aseprite_atlas(
+            sheet_width,
+            sheet_height,
+            spritesheet_type,
+            sprite_count,
+            sprite_names,
+            columns,
+            image_filename,
+            frame_duration,
+        )
+        aseprite_json = json.dumps(atlas, indent=2, ensure_ascii=False)
+
+        json_path = ""
+        if save_json:
+            output_dir = folder_paths.get_output_directory()
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            suffix = str(uuid.uuid4())[:8]
+            safe_prefix = _safe_filename_stem(filename_prefix, "vn_character_atlas")
+            json_filename = f"{safe_prefix}_{timestamp}_{suffix}.json"
+            json_path = os.path.join(output_dir, json_filename)
+            with open(json_path, "w", encoding="utf-8") as json_file:
+                json_file.write(aseprite_json)
+
+        layout = atlas["meta"]["layout"]
+        report = "\n".join(
+            [
+                "Aseprite visual novel atlas",
+                f"type: {spritesheet_type}",
+                f"spritesheet: {int(sheet_width)}x{int(sheet_height)}",
+                f"sprites: {layout['spriteCount']}",
+                f"layout: {layout['columns']} columns x {layout['rows']} rows",
+                f"frame: {layout['frameWidth']}x{layout['frameHeight']}",
+                f"image: {image_filename}",
+                f"json: {json_path or 'not saved'}",
+            ]
+        )
+        print(
+            f"[GameAssetsMaker] Generated Aseprite atlas with {layout['spriteCount']} frames "
+            f"({layout['columns']}x{layout['rows']})",
+            flush=True,
+        )
+        return (aseprite_json, json_path, report)
+
+
 NODE_CLASS_MAPPINGS = {
     "GameAssets_SeeThroughPartsToSVGPaths": GameAssets_SeeThroughPartsToSVGPaths,
     "GameAssets_SeeThroughPartsRigProbe": GameAssets_SeeThroughPartsRigProbe,
@@ -1619,6 +1817,7 @@ NODE_CLASS_MAPPINGS = {
     "GameAssets_ApplyRigOverrides": GameAssets_ApplyRigOverrides,
     "GameAssets_RigToSpineExport": GameAssets_RigToSpineExport,
     "GameAssets_RigToSVGPreview": GameAssets_RigToSVGPreview,
+    "GameAssets_AsepriteVisualNovelAtlas": GameAssets_AsepriteVisualNovelAtlas,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1628,4 +1827,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "GameAssets_ApplyRigOverrides": "Apply Rig Overrides",
     "GameAssets_RigToSpineExport": "Rig To Spine Export",
     "GameAssets_RigToSVGPreview": "Rig To SVG Preview",
+    "GameAssets_AsepriteVisualNovelAtlas": "Aseprite Visual Novel Atlas",
 }

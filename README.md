@@ -4,6 +4,14 @@ Custom ComfyUI nodes for game asset preparation workflows.
 
 ## Nodes
 
+### Aseprite Visual Novel Atlas
+
+Generates an Aseprite-compatible JSON atlas for visual novel character spritesheets.
+
+Set the spritesheet width/height, choose **Half Body**, **Full Body**, or **Face Expressions**, then set the sprite count. The frontend adds one name field per sprite and stores those names in the atlas frame keys, such as `neutral.png`, `happy.png`, or `angry.png`.
+
+Use `columns` to describe the sheet layout. `0` means a single horizontal strip; otherwise the node calculates rows from `sprite_count / columns` and validates that the sheet divides evenly into uniform frames. The output JSON uses Aseprite's hash format with `frames` coordinates and `meta.image` pointing at `image_filename`.
+
 ### SeeThrough Parts To SVG Paths
 
 Converts `SEETHROUGH_PARTS` from `SeeThrough_PostProcess` into SVG path outlines.
