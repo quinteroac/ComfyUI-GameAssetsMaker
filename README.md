@@ -10,7 +10,35 @@ Generates an Aseprite-compatible JSON atlas for visual novel character spriteshe
 
 Set the spritesheet width/height, choose **Half Body**, **Full Body**, or **Face Expressions**, then set the sprite count. The frontend adds one name field per sprite and stores those names in the atlas frame keys, such as `neutral.png`, `happy.png`, or `angry.png`.
 
-Use `columns` to describe the sheet layout. `0` means a single horizontal strip; otherwise the node calculates rows from `sprite_count / columns` and validates that the sheet divides evenly into uniform frames. The output JSON uses Aseprite's hash format with `frames` coordinates and `meta.image` pointing at `image_filename`.
+Use `layout_direction` to choose **Horizontal**, **Vertical**, or **Grid**. Horizontal places all sprites in one row, Vertical places all sprites in one column, and Grid uses `columns` to calculate the rows. The node validates that the sheet divides evenly into uniform frames. The output JSON uses Aseprite's hash format with `frames` coordinates and `meta.image` pointing at `image_filename`.
+
+### Aseprite Atlas Sprite Preview
+
+Receives an Aseprite JSON atlas and the spritesheet image, then crops every atlas frame into a separate image in a ComfyUI `IMAGE` batch.
+
+Connect `aseprite_json` from **Aseprite Visual Novel Atlas** and connect the generated/loaded spritesheet image to `spritesheet`. The `sprites` output can go into **Preview Image** or **Save Image** to inspect each sprite separately. If incoming atlas frames have different sizes, the node pads them onto the largest frame canvas so they can stay in one batch.
+
+### Aseprite Animation Tags
+
+Generates Aseprite-style animation metadata using `meta.frameTags`.
+
+Set the total `frame_count` and `animation_count`; the frontend adds fields for each animation tag: name, first frame, last frame, playback direction, and tag color. Directions use Aseprite's exported values: `forward`, `reverse`, or `pingpong`.
+
+Optionally connect an existing atlas JSON to `aseprite_json`. In that mode the node returns a merged JSON containing the original atlas frames plus `meta.frameTags`, ready for engines or importers that read animations from Aseprite frame tags.
+
+### Aseprite Animation Atlas
+
+Generates a standalone Aseprite-compatible JSON atlas for animation spritesheets.
+
+This node is separate from **Aseprite Visual Novel Atlas**. Use it when the spritesheet contains animation frames such as `idle_01`, `idle_02`, `idle_03`, and `idle_04`, not character expression states like `neutral`, `happy`, `sad`, or `angry`.
+
+Set the spritesheet size, total `frame_count`, layout direction, and animation tags. For example, an `idle` animation with 4 frames uses a single tag named `idle` from frame `0` to `3`. The node creates both `frames` and `meta.frameTags` in one JSON.
+
+### Aseprite Animation Preview
+
+Receives a spritesheet image and an Aseprite JSON atlas with `meta.frameTags`, then extracts the selected animation as an `IMAGE` batch.
+
+Set `animation_name` to one of the frame tag names. The node resolves `forward`, `reverse`, and `pingpong` playback order, repeats it with `loop_count`, and outputs `frame_delay_ms` from the atlas frame durations. Connect `animation_frames` to **Preview Image** or to an animated WebP/GIF/video saver node.
 
 ### SeeThrough Parts To SVG Paths
 

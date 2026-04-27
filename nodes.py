@@ -12,6 +12,7 @@ from xml.sax.saxutils import escape
 import cv2
 import folder_paths
 import numpy as np
+import torch
 
 try:
     from aiohttp import web
@@ -77,6 +78,8 @@ SPINE_ANIMATION_PRESETS = ["all", "full_idle", "idle_breath", "blink", "hair_swa
 SPINE_CONTROL_BONE_ROLES = {"clothing", "torso", "head", "hair", "iris", "eyelash"}
 SPINE_POINT_CONTROL_ROLES = {"hair", "iris", "eyelash"}
 ASEPRITE_SPRITESHEET_TYPES = ["Half Body", "Full Body", "Face Expressions"]
+ASEPRITE_LAYOUT_DIRECTIONS = ["Horizontal", "Vertical", "Grid"]
+ASEPRITE_ANIMATION_DIRECTIONS = ["forward", "reverse", "pingpong"]
 ASEPRITE_EXPORT_VERSION = "aseprite-atlas-v1"
 
 SIDE_WORDS = {
@@ -170,6 +173,7 @@ def _build_aseprite_atlas(
     sheet_height,
     spritesheet_type,
     sprite_count,
+    layout_direction,
     sprite_names,
     columns,
     image_filename,
@@ -184,8 +188,15 @@ def _build_aseprite_atlas(
         raise ValueError("Spritesheet width and height must be greater than zero")
     if sprite_count <= 0:
         raise ValueError("Sprite count must be greater than zero")
-    if columns <= 0:
+
+    layout_direction = str(layout_direction or "Horizontal")
+    if layout_direction == "Horizontal":
         columns = sprite_count
+    elif layout_direction == "Vertical":
+        columns = 1
+    elif columns <= 0:
+        columns = sprite_count
+
     if columns > sprite_count:
         columns = sprite_count
 
@@ -224,6 +235,7 @@ def _build_aseprite_atlas(
             "scale": "1",
             "spritesheetType": spritesheet_type,
             "layout": {
+                "direction": layout_direction,
                 "columns": columns,
                 "rows": rows,
                 "spriteCount": sprite_count,
@@ -233,6 +245,249 @@ def _build_aseprite_atlas(
         },
     }
     return atlas
+
+
+def _load_aseprite_atlas(aseprite_json):
+    if isinstance(aseprite_json, dict):
+        atlas = deepcopy(aseprite_json)
+    else:
+        try:
+            atlas = json.loads(str(aseprite_json or ""))
+        except json.JSONDecodeError as error:
+            raise ValueError(f"Invalid Aseprite JSON: {error}") from error
+    if not isinstance(atlas, dict):
+        raise ValueError("Invalid Aseprite JSON: expected an object")
+    return atlas
+
+
+def _aseprite_frame_items(atlas):
+    frames = atlas.get("frames")
+    if isinstance(frames, dict):
+        items = list(frames.items())
+    elif isinstance(frames, list):
+        items = []
+        for index, frame_data in enumerate(frames):
+            if not isinstance(frame_data, dict):
+                continue
+            filename = frame_data.get("filename") or f"sprite_{index + 1:02d}.png"
+            items.append((str(filename), frame_data))
+    else:
+        raise ValueError("Invalid Aseprite JSON: missing frames object/list")
+
+    parsed = []
+    for filename, frame_data in items:
+        if not isinstance(frame_data, dict) or not isinstance(frame_data.get("frame"), dict):
+            continue
+        frame = frame_data["frame"]
+        try:
+            x = int(frame["x"])
+            y = int(frame["y"])
+            w = int(frame["w"])
+            h = int(frame["h"])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"Invalid frame coordinates for {filename}") from error
+        if w <= 0 or h <= 0:
+            raise ValueError(f"Invalid frame size for {filename}: {w}x{h}")
+        parsed.append({"name": str(filename), "x": x, "y": y, "w": w, "h": h})
+
+    if not parsed:
+        raise ValueError("Aseprite JSON does not contain any valid frames")
+    return parsed
+
+
+def _extract_aseprite_sprites(image, frame_items, image_index=0, background_value=0.0):
+    if not isinstance(image, torch.Tensor) or image.ndim != 4:
+        raise ValueError("Expected IMAGE tensor with shape [batch, height, width, channels]")
+
+    batch_index = max(0, min(int(image_index), image.shape[0] - 1))
+    sheet = image[batch_index]
+    sheet_h, sheet_w = int(sheet.shape[0]), int(sheet.shape[1])
+    channels = int(sheet.shape[2])
+
+    max_w = max(item["w"] for item in frame_items)
+    max_h = max(item["h"] for item in frame_items)
+    sprites = []
+    clipped = []
+
+    for item in frame_items:
+        x1 = max(0, item["x"])
+        y1 = max(0, item["y"])
+        x2 = min(sheet_w, item["x"] + item["w"])
+        y2 = min(sheet_h, item["y"] + item["h"])
+        if x1 >= x2 or y1 >= y2:
+            raise ValueError(f"Frame {item['name']} is outside the spritesheet bounds")
+
+        crop = sheet[y1:y2, x1:x2, :]
+        canvas = torch.full(
+            (max_h, max_w, channels),
+            float(background_value),
+            dtype=sheet.dtype,
+            device=sheet.device,
+        )
+        canvas[: crop.shape[0], : crop.shape[1], :] = crop
+        sprites.append(canvas)
+
+        if x1 != item["x"] or y1 != item["y"] or x2 != item["x"] + item["w"] or y2 != item["y"] + item["h"]:
+            clipped.append(item["name"])
+
+    return torch.stack(sprites, dim=0), clipped
+
+
+def _parse_aseprite_animation_tags(animation_tags, animation_count, frame_count):
+    if isinstance(animation_tags, (list, tuple)):
+        raw_tags = list(animation_tags)
+    else:
+        text = str(animation_tags or "").strip()
+        raw_tags = []
+        if text:
+            try:
+                loaded = json.loads(text)
+                if isinstance(loaded, list):
+                    raw_tags = loaded
+            except json.JSONDecodeError:
+                raw_tags = []
+
+    frame_count = max(1, int(frame_count))
+    animation_count = max(1, int(animation_count))
+    tags = []
+    for index in range(animation_count):
+        raw = raw_tags[index] if index < len(raw_tags) and isinstance(raw_tags[index], dict) else {}
+        name = _safe_filename_stem(raw.get("name") or f"animation_{index + 1:02d}", f"animation_{index + 1:02d}")
+        from_frame = int(raw.get("from", 0))
+        to_frame = int(raw.get("to", frame_count - 1))
+        direction = str(raw.get("direction") or "forward").lower()
+        color = str(raw.get("color") or "#000000ff")
+
+        if direction not in ASEPRITE_ANIMATION_DIRECTIONS:
+            direction = "forward"
+        from_frame = max(0, min(frame_count - 1, from_frame))
+        to_frame = max(0, min(frame_count - 1, to_frame))
+        if from_frame > to_frame:
+            from_frame, to_frame = to_frame, from_frame
+        if not re.match(r"^#[0-9a-fA-F]{8}$", color):
+            color = "#000000ff"
+
+        tags.append(
+            {
+                "name": name,
+                "from": from_frame,
+                "to": to_frame,
+                "direction": direction,
+                "color": color.lower(),
+            }
+        )
+    return tags
+
+
+def _build_aseprite_animation_json(aseprite_json, frame_count, animation_count, animation_tags):
+    if str(aseprite_json or "").strip():
+        output = _load_aseprite_atlas(aseprite_json)
+        try:
+            inferred_frame_count = len(_aseprite_frame_items(output))
+        except ValueError:
+            inferred_frame_count = int(frame_count)
+        frame_count = inferred_frame_count or int(frame_count)
+    else:
+        output = {"meta": {}}
+
+    tags = _parse_aseprite_animation_tags(animation_tags, animation_count, frame_count)
+    meta = output.setdefault("meta", {})
+    meta["frameTags"] = tags
+    return output, tags
+
+
+def _aseprite_animation_frame_names(frame_count, tags, fallback_prefix):
+    frame_count = max(1, int(frame_count))
+    counters = {}
+    names = []
+    for frame_index in range(frame_count):
+        owner = None
+        for tag in tags:
+            if int(tag["from"]) <= frame_index <= int(tag["to"]):
+                owner = tag["name"]
+                break
+        base = _safe_filename_stem(owner or fallback_prefix or "frame", "frame")
+        counters[base] = counters.get(base, 0) + 1
+        names.append(f"{base}_{counters[base]:02d}")
+    return names
+
+
+def _build_aseprite_animation_atlas(
+    sheet_width,
+    sheet_height,
+    frame_count,
+    layout_direction,
+    columns,
+    animation_count,
+    animation_tags,
+    image_filename,
+    frame_duration,
+    frame_name_prefix,
+):
+    tags = _parse_aseprite_animation_tags(animation_tags, animation_count, frame_count)
+    frame_names = _aseprite_animation_frame_names(frame_count, tags, frame_name_prefix)
+    atlas = _build_aseprite_atlas(
+        sheet_width=sheet_width,
+        sheet_height=sheet_height,
+        spritesheet_type="Animation",
+        sprite_count=frame_count,
+        layout_direction=layout_direction,
+        sprite_names=frame_names,
+        columns=columns,
+        image_filename=image_filename,
+        frame_duration=frame_duration,
+    )
+    atlas["meta"]["frameTags"] = tags
+    atlas["meta"]["atlasType"] = "Animation"
+    return atlas, tags, frame_names
+
+
+def _aseprite_frame_tags(atlas):
+    tags = atlas.get("meta", {}).get("frameTags", [])
+    if not isinstance(tags, list):
+        return []
+    normalized = []
+    for index, tag in enumerate(tags):
+        if not isinstance(tag, dict):
+            continue
+        try:
+            from_frame = int(tag.get("from", 0))
+            to_frame = int(tag.get("to", from_frame))
+        except (TypeError, ValueError):
+            continue
+        direction = str(tag.get("direction") or "forward").lower()
+        if direction not in ASEPRITE_ANIMATION_DIRECTIONS:
+            direction = "forward"
+        normalized.append(
+            {
+                "name": str(tag.get("name") or f"animation_{index + 1:02d}"),
+                "from": from_frame,
+                "to": to_frame,
+                "direction": direction,
+                "color": str(tag.get("color") or "#000000ff"),
+            }
+        )
+    return normalized
+
+
+def _animation_frame_indexes(tag, frame_count, loop_count=1, include_pingpong_endpoint=False):
+    if frame_count <= 0:
+        return []
+    start = max(0, min(frame_count - 1, int(tag.get("from", 0))))
+    end = max(0, min(frame_count - 1, int(tag.get("to", start))))
+    if start > end:
+        start, end = end, start
+
+    indexes = list(range(start, end + 1))
+    direction = str(tag.get("direction") or "forward").lower()
+    if direction == "reverse":
+        indexes = list(reversed(indexes))
+    elif direction == "pingpong" and len(indexes) > 1:
+        reverse_tail = list(reversed(indexes if include_pingpong_endpoint else indexes[1:-1]))
+        indexes = indexes + reverse_tail
+
+    loop_count = max(1, int(loop_count))
+    return indexes * loop_count
 
 
 def _contour_to_path(contour, offset_x, offset_y, close_path=True):
@@ -1729,6 +1984,7 @@ class GameAssets_AsepriteVisualNovelAtlas:
                 "sheet_height": ("INT", {"default": 2048, "min": 1, "max": 65536, "step": 1}),
                 "spritesheet_type": (ASEPRITE_SPRITESHEET_TYPES, {"default": "Half Body"}),
                 "sprite_count": ("INT", {"default": 4, "min": 1, "max": 128, "step": 1}),
+                "layout_direction": (ASEPRITE_LAYOUT_DIRECTIONS, {"default": "Horizontal"}),
                 "columns": ("INT", {"default": 0, "min": 0, "max": 128, "step": 1}),
                 "sprite_names": (
                     "STRING",
@@ -1759,6 +2015,7 @@ class GameAssets_AsepriteVisualNovelAtlas:
         sheet_height=2048,
         spritesheet_type="Half Body",
         sprite_count=4,
+        layout_direction="Horizontal",
         columns=0,
         sprite_names='["neutral", "happy", "sad", "angry"]',
         image_filename="visual_novel_character.png",
@@ -1771,6 +2028,7 @@ class GameAssets_AsepriteVisualNovelAtlas:
             sheet_height,
             spritesheet_type,
             sprite_count,
+            layout_direction,
             sprite_names,
             columns,
             image_filename,
@@ -1796,6 +2054,7 @@ class GameAssets_AsepriteVisualNovelAtlas:
                 f"type: {spritesheet_type}",
                 f"spritesheet: {int(sheet_width)}x{int(sheet_height)}",
                 f"sprites: {layout['spriteCount']}",
+                f"direction: {layout['direction']}",
                 f"layout: {layout['columns']} columns x {layout['rows']} rows",
                 f"frame: {layout['frameWidth']}x{layout['frameHeight']}",
                 f"image: {image_filename}",
@@ -1810,6 +2069,312 @@ class GameAssets_AsepriteVisualNovelAtlas:
         return (aseprite_json, json_path, report)
 
 
+class GameAssets_AsepriteAtlasSpritePreview:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "spritesheet": ("IMAGE",),
+                "aseprite_json": ("STRING", {"default": "", "multiline": True}),
+                "image_index": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
+                "background_value": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING")
+    RETURN_NAMES = ("sprites", "sprite_names", "report")
+    FUNCTION = "preview"
+    CATEGORY = "Game Assets/Aseprite"
+
+    def preview(self, spritesheet, aseprite_json, image_index=0, background_value=0.0):
+        atlas = _load_aseprite_atlas(aseprite_json)
+        frame_items = _aseprite_frame_items(atlas)
+        sprites, clipped = _extract_aseprite_sprites(spritesheet, frame_items, image_index, background_value)
+
+        names = [item["name"] for item in frame_items]
+        max_w = max(item["w"] for item in frame_items)
+        max_h = max(item["h"] for item in frame_items)
+        lines = [
+            "Aseprite sprite preview",
+            f"sprites: {len(frame_items)}",
+            f"output batch: {len(frame_items)} images",
+            f"canvas per sprite: {max_w}x{max_h}",
+            f"source image index: {max(0, min(int(image_index), int(spritesheet.shape[0]) - 1))}",
+            f"clipped frames: {', '.join(clipped) if clipped else 'none'}",
+            "",
+            "frames:",
+        ]
+        for item in frame_items:
+            lines.append(f"- {item['name']}: x={item['x']} y={item['y']} w={item['w']} h={item['h']}")
+
+        report = "\n".join(lines)
+        print(f"[GameAssetsMaker] Extracted {len(frame_items)} Aseprite sprites for preview", flush=True)
+        return (sprites, "\n".join(names), report)
+
+
+class GameAssets_AsepriteAnimationTags:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "frame_count": ("INT", {"default": 4, "min": 1, "max": 10000, "step": 1}),
+                "animation_count": ("INT", {"default": 1, "min": 1, "max": 128, "step": 1}),
+                "animation_tags": (
+                    "STRING",
+                    {
+                        "default": '[{"name":"idle","from":0,"to":3,"direction":"forward","color":"#000000ff"}]',
+                    },
+                ),
+                "save_json": ("BOOLEAN", {"default": True}),
+                "filename_prefix": ("STRING", {"default": "aseprite_animation_tags"}),
+            },
+            "optional": {
+                "aseprite_json": ("STRING", {"default": "", "multiline": True}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("animation_json", "merged_aseprite_json", "json_path", "report")
+    FUNCTION = "generate"
+    CATEGORY = "Game Assets/Aseprite"
+    OUTPUT_NODE = True
+
+    def generate(
+        self,
+        frame_count=4,
+        animation_count=1,
+        animation_tags='[{"name":"idle","from":0,"to":3,"direction":"forward","color":"#000000ff"}]',
+        save_json=True,
+        filename_prefix="aseprite_animation_tags",
+        aseprite_json="",
+    ):
+        merged, tags = _build_aseprite_animation_json(aseprite_json, frame_count, animation_count, animation_tags)
+        animation_payload = {"meta": {"frameTags": tags}}
+        animation_json = json.dumps(animation_payload, indent=2, ensure_ascii=False)
+        merged_json = json.dumps(merged, indent=2, ensure_ascii=False)
+
+        json_path = ""
+        if save_json:
+            output_dir = folder_paths.get_output_directory()
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            suffix = str(uuid.uuid4())[:8]
+            safe_prefix = _safe_filename_stem(filename_prefix, "aseprite_animation_tags")
+            json_filename = f"{safe_prefix}_{timestamp}_{suffix}.json"
+            json_path = os.path.join(output_dir, json_filename)
+            with open(json_path, "w", encoding="utf-8") as json_file:
+                json_file.write(merged_json)
+
+        lines = [
+            "Aseprite animation tags",
+            f"frame count: {max(1, int(frame_count))}",
+            f"animations: {len(tags)}",
+            f"merged atlas: {'yes' if str(aseprite_json or '').strip() else 'no'}",
+            f"json: {json_path or 'not saved'}",
+            "",
+            "tags:",
+        ]
+        for tag in tags:
+            lines.append(
+                f"- {tag['name']}: frames {tag['from']}..{tag['to']} "
+                f"direction={tag['direction']} color={tag['color']}"
+            )
+        report = "\n".join(lines)
+        print(f"[GameAssetsMaker] Generated {len(tags)} Aseprite animation frame tags", flush=True)
+        return (animation_json, merged_json, json_path, report)
+
+
+class GameAssets_AsepriteAnimationAtlas:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "sheet_width": ("INT", {"default": 1024, "min": 1, "max": 65536, "step": 1}),
+                "sheet_height": ("INT", {"default": 1024, "min": 1, "max": 65536, "step": 1}),
+                "frame_count": ("INT", {"default": 4, "min": 1, "max": 10000, "step": 1}),
+                "layout_direction": (ASEPRITE_LAYOUT_DIRECTIONS, {"default": "Horizontal"}),
+                "columns": ("INT", {"default": 0, "min": 0, "max": 128, "step": 1}),
+                "animation_count": ("INT", {"default": 1, "min": 1, "max": 128, "step": 1}),
+                "animation_tags": (
+                    "STRING",
+                    {
+                        "default": '[{"name":"idle","from":0,"to":3,"direction":"forward","color":"#000000ff"}]',
+                    },
+                ),
+                "image_filename": ("STRING", {"default": "animation_spritesheet.png"}),
+                "frame_duration": ("INT", {"default": 100, "min": 1, "max": 60000, "step": 1}),
+                "frame_name_prefix": ("STRING", {"default": "frame"}),
+                "save_json": ("BOOLEAN", {"default": True}),
+                "filename_prefix": ("STRING", {"default": "aseprite_animation_atlas"}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("aseprite_json", "json_path", "report")
+    FUNCTION = "generate"
+    CATEGORY = "Game Assets/Aseprite"
+    OUTPUT_NODE = True
+
+    def generate(
+        self,
+        sheet_width=1024,
+        sheet_height=1024,
+        frame_count=4,
+        layout_direction="Horizontal",
+        columns=0,
+        animation_count=1,
+        animation_tags='[{"name":"idle","from":0,"to":3,"direction":"forward","color":"#000000ff"}]',
+        image_filename="animation_spritesheet.png",
+        frame_duration=100,
+        frame_name_prefix="frame",
+        save_json=True,
+        filename_prefix="aseprite_animation_atlas",
+    ):
+        atlas, tags, frame_names = _build_aseprite_animation_atlas(
+            sheet_width,
+            sheet_height,
+            frame_count,
+            layout_direction,
+            columns,
+            animation_count,
+            animation_tags,
+            image_filename,
+            frame_duration,
+            frame_name_prefix,
+        )
+        aseprite_json = json.dumps(atlas, indent=2, ensure_ascii=False)
+
+        json_path = ""
+        if save_json:
+            output_dir = folder_paths.get_output_directory()
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            suffix = str(uuid.uuid4())[:8]
+            safe_prefix = _safe_filename_stem(filename_prefix, "aseprite_animation_atlas")
+            json_filename = f"{safe_prefix}_{timestamp}_{suffix}.json"
+            json_path = os.path.join(output_dir, json_filename)
+            with open(json_path, "w", encoding="utf-8") as json_file:
+                json_file.write(aseprite_json)
+
+        layout = atlas["meta"]["layout"]
+        lines = [
+            "Aseprite animation atlas",
+            f"spritesheet: {int(sheet_width)}x{int(sheet_height)}",
+            f"frames: {layout['spriteCount']}",
+            f"direction: {layout['direction']}",
+            f"layout: {layout['columns']} columns x {layout['rows']} rows",
+            f"frame: {layout['frameWidth']}x{layout['frameHeight']}",
+            f"image: {image_filename}",
+            f"json: {json_path or 'not saved'}",
+            "",
+            "animations:",
+        ]
+        for tag in tags:
+            lines.append(
+                f"- {tag['name']}: frames {tag['from']}..{tag['to']} "
+                f"direction={tag['direction']} color={tag['color']}"
+            )
+        lines.extend(["", "frame names:", *[f"- {name}.png" for name in frame_names]])
+        report = "\n".join(lines)
+        print(
+            f"[GameAssetsMaker] Generated animation atlas with {len(frame_names)} frames and {len(tags)} tags",
+            flush=True,
+        )
+        return (aseprite_json, json_path, report)
+
+
+class GameAssets_AsepriteAnimationPreview:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "spritesheet": ("IMAGE",),
+                "aseprite_json": ("STRING", {"default": "", "multiline": True}),
+                "animation_name": ("STRING", {"default": "idle"}),
+                "image_index": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
+                "loop_count": ("INT", {"default": 1, "min": 1, "max": 64, "step": 1}),
+                "include_pingpong_endpoint": ("BOOLEAN", {"default": False}),
+                "background_value": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING", "INT", "STRING")
+    RETURN_NAMES = ("animation_frames", "frame_names", "frame_delay_ms", "report")
+    FUNCTION = "preview"
+    CATEGORY = "Game Assets/Aseprite"
+
+    def preview(
+        self,
+        spritesheet,
+        aseprite_json,
+        animation_name="idle",
+        image_index=0,
+        loop_count=1,
+        include_pingpong_endpoint=False,
+        background_value=0.0,
+    ):
+        atlas = _load_aseprite_atlas(aseprite_json)
+        frame_items = _aseprite_frame_items(atlas)
+        tags = _aseprite_frame_tags(atlas)
+        if not tags:
+            raise ValueError("Aseprite JSON does not contain meta.frameTags")
+
+        selected = None
+        requested = str(animation_name or "").strip()
+        for tag in tags:
+            if tag["name"] == requested:
+                selected = tag
+                break
+        if selected is None:
+            selected = tags[0]
+
+        indexes = _animation_frame_indexes(
+            selected,
+            len(frame_items),
+            loop_count=loop_count,
+            include_pingpong_endpoint=include_pingpong_endpoint,
+        )
+        if not indexes:
+            raise ValueError(f"Animation {selected['name']} does not resolve to any frames")
+
+        selected_items = [frame_items[index] for index in indexes]
+        animation_frames, clipped = _extract_aseprite_sprites(
+            spritesheet,
+            selected_items,
+            image_index=image_index,
+            background_value=background_value,
+        )
+        names = [item["name"] for item in selected_items]
+
+        durations = []
+        raw_frames = atlas.get("frames", {})
+        for item in selected_items:
+            frame_data = raw_frames.get(item["name"], {}) if isinstance(raw_frames, dict) else {}
+            try:
+                durations.append(int(frame_data.get("duration", 100)))
+            except (TypeError, ValueError):
+                durations.append(100)
+        frame_delay_ms = int(round(sum(durations) / len(durations))) if durations else 100
+
+        report = "\n".join(
+            [
+                "Aseprite animation preview",
+                f"requested animation: {requested or '(first tag)'}",
+                f"selected animation: {selected['name']}",
+                f"direction: {selected['direction']}",
+                f"source range: {selected['from']}..{selected['to']}",
+                f"output frames: {len(indexes)}",
+                f"frame indexes: {', '.join(str(index) for index in indexes)}",
+                f"frame delay: {frame_delay_ms} ms",
+                f"clipped frames: {', '.join(clipped) if clipped else 'none'}",
+                f"available animations: {', '.join(tag['name'] for tag in tags)}",
+            ]
+        )
+        print(
+            f"[GameAssetsMaker] Built animation preview '{selected['name']}' with {len(indexes)} frames",
+            flush=True,
+        )
+        return (animation_frames, "\n".join(names), frame_delay_ms, report)
+
+
 NODE_CLASS_MAPPINGS = {
     "GameAssets_SeeThroughPartsToSVGPaths": GameAssets_SeeThroughPartsToSVGPaths,
     "GameAssets_SeeThroughPartsRigProbe": GameAssets_SeeThroughPartsRigProbe,
@@ -1818,6 +2383,10 @@ NODE_CLASS_MAPPINGS = {
     "GameAssets_RigToSpineExport": GameAssets_RigToSpineExport,
     "GameAssets_RigToSVGPreview": GameAssets_RigToSVGPreview,
     "GameAssets_AsepriteVisualNovelAtlas": GameAssets_AsepriteVisualNovelAtlas,
+    "GameAssets_AsepriteAtlasSpritePreview": GameAssets_AsepriteAtlasSpritePreview,
+    "GameAssets_AsepriteAnimationTags": GameAssets_AsepriteAnimationTags,
+    "GameAssets_AsepriteAnimationAtlas": GameAssets_AsepriteAnimationAtlas,
+    "GameAssets_AsepriteAnimationPreview": GameAssets_AsepriteAnimationPreview,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -1828,4 +2397,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "GameAssets_RigToSpineExport": "Rig To Spine Export",
     "GameAssets_RigToSVGPreview": "Rig To SVG Preview",
     "GameAssets_AsepriteVisualNovelAtlas": "Aseprite Visual Novel Atlas",
+    "GameAssets_AsepriteAtlasSpritePreview": "Aseprite Atlas Sprite Preview",
+    "GameAssets_AsepriteAnimationTags": "Aseprite Animation Tags",
+    "GameAssets_AsepriteAnimationAtlas": "Aseprite Animation Atlas",
+    "GameAssets_AsepriteAnimationPreview": "Aseprite Animation Preview",
 }
