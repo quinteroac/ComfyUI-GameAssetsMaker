@@ -13,7 +13,7 @@ cd /path/to/ComfyUI/custom_nodes
 2. Clone this repository:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ComfyUI-GameAssetsMaker.git
+git clone https://github.com/quinteroac/ComfyUI-GameAssetsMaker.git
 ```
 
 3. Install dependencies:
