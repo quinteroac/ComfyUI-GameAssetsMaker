@@ -1,0 +1,507 @@
+{
+  "id": "8fa1e5c5-ba51-4b23-987e-df2624ad7139",
+  "revision": 0,
+  "last_node_id": 42,
+  "last_link_id": 71,
+  "nodes": [
+    {
+      "id": 10,
+      "type": "OpenAIGPTImage1",
+      "pos": [
+        -2451.2072020858827,
+        -838.2917851666142
+      ],
+      "size": [
+        400,
+        322
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": 11
+        },
+        {
+          "name": "mask",
+          "shape": 7,
+          "type": "MASK",
+          "link": null
+        },
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "prompt"
+          },
+          "link": 12
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            19,
+            25
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.19.3",
+        "Node name for S&R": "OpenAIGPTImage1"
+      },
+      "widgets_values": [
+        "",
+        1528715016,
+        "fixed",
+        "low",
+        "auto",
+        "2048x2048",
+        1,
+        "gpt-image-2"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 2,
+      "type": "ShowText|pysssss",
+      "pos": [
+        -4096.722728267241,
+        -867.9889949993542
+      ],
+      "size": [
+        679.1233203763018,
+        746.4760162465905
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "text",
+          "type": "STRING",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "shape": 6,
+          "type": "STRING",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-custom-scripts",
+        "ver": "1.2.5",
+        "Node name for S&R": "ShowText|pysssss"
+      },
+      "widgets_values": [
+        "{\n  \"frames\": {\n    \"dancing_01.png\": {\n      \"frame\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_02.png\": {\n      \"frame\": {\n        \"x\": 512,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_03.png\": {\n      \"frame\": {\n        \"x\": 1024,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_04.png\": {\n      \"frame\": {\n        \"x\": 1536,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_05.png\": {\n      \"frame\": {\n        \"x\": 0,\n        \"y\": 512,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_06.png\": {\n      \"frame\": {\n        \"x\": 512,\n        \"y\": 512,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_07.png\": {\n      \"frame\": {\n        \"x\": 1024,\n        \"y\": 512,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_08.png\": {\n      \"frame\": {\n        \"x\": 1536,\n        \"y\": 512,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_09.png\": {\n      \"frame\": {\n        \"x\": 0,\n        \"y\": 1024,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_10.png\": {\n      \"frame\": {\n        \"x\": 512,\n        \"y\": 1024,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_11.png\": {\n      \"frame\": {\n        \"x\": 1024,\n        \"y\": 1024,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_12.png\": {\n      \"frame\": {\n        \"x\": 1536,\n        \"y\": 1024,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_13.png\": {\n      \"frame\": {\n        \"x\": 0,\n        \"y\": 1536,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_14.png\": {\n      \"frame\": {\n        \"x\": 512,\n        \"y\": 1536,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_15.png\": {\n      \"frame\": {\n        \"x\": 1024,\n        \"y\": 1536,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    },\n    \"dancing_16.png\": {\n      \"frame\": {\n        \"x\": 1536,\n        \"y\": 1536,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"rotated\": false,\n      \"trimmed\": false,\n      \"spriteSourceSize\": {\n        \"x\": 0,\n        \"y\": 0,\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"sourceSize\": {\n        \"w\": 512,\n        \"h\": 512\n      },\n      \"duration\": 100\n    }\n  },\n  \"meta\": {\n    \"app\": \"ComfyUI Game Assets Maker\",\n    \"version\": \"aseprite-atlas-v1\",\n    \"image\": \"animation_spritesheet.png\",\n    \"format\": \"RGBA8888\",\n    \"size\": {\n      \"w\": 2048,\n      \"h\": 2048\n    },\n    \"scale\": \"1\",\n    \"spritesheetType\": \"Animation\",\n    \"layout\": {\n      \"direction\": \"Grid\",\n      \"columns\": 4,\n      \"rows\": 4,\n      \"spriteCount\": 16,\n      \"frameWidth\": 512,\n      \"frameHeight\": 512\n    },\n    \"frameTags\": [\n      {\n        \"name\": \"dancing\",\n        \"from\": 0,\n        \"to\": 15,\n        \"direction\": \"forward\",\n        \"color\": \"#000000ff\"\n      }\n    ],\n    \"atlasType\": \"Animation\"\n  }\n}"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "StringConcatenate",
+      "pos": [
+        -3035.5401232344702,
+        -808.8292835143085
+      ],
+      "size": [
+        400,
+        200
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "string_b",
+          "type": "STRING",
+          "widget": {
+            "name": "string_b"
+          },
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": [
+            12
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.19.3",
+        "Node name for S&R": "StringConcatenate"
+      },
+      "widgets_values": [
+        "Genera un secuencia de animacion del personaje de la imagen con los fotogramas basado en el siguiente json. No generes texto. Evita dejar lineas de division.",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": 11,
+      "type": "GameAssets_AsepriteAnimationPreview",
+      "pos": [
+        -1905.5003259957834,
+        -842.4984298809504
+      ],
+      "size": [
+        400,
+        268
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "spritesheet",
+          "type": "IMAGE",
+          "link": 25
+        },
+        {
+          "name": "aseprite_json",
+          "type": "STRING",
+          "widget": {
+            "name": "aseprite_json"
+          },
+          "link": 44
+        }
+      ],
+      "outputs": [
+        {
+          "name": "animation_frames",
+          "type": "IMAGE",
+          "links": [
+            71
+          ]
+        },
+        {
+          "name": "frame_names",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "frame_delay_ms",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "GameAssets_AsepriteAnimationPreview"
+      },
+      "widgets_values": [
+        "",
+        "dancing",
+        0,
+        1,
+        false,
+        0
+      ]
+    },
+    {
+      "id": 16,
+      "type": "PreviewImage",
+      "pos": [
+        -2452.9571998408396,
+        -456.99118602610275
+      ],
+      "size": [
+        721.898779995925,
+        504.1780494084169
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 19
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.19.3",
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 7,
+      "type": "GameAssets_AsepriteAnimationAtlas",
+      "pos": [
+        -3337.929719744328,
+        -862.4419115206614
+      ],
+      "size": [
+        212.85546875,
+        434
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "aseprite_json",
+          "type": "STRING",
+          "links": [
+            9,
+            44
+          ]
+        },
+        {
+          "name": "json_path",
+          "type": "STRING",
+          "links": null
+        },
+        {
+          "name": "report",
+          "type": "STRING",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "GameAssets_AsepriteAnimationAtlas"
+      },
+      "widgets_values": [
+        2048,
+        2048,
+        16,
+        "Grid",
+        0,
+        1,
+        "[{\"name\":\"dancing\",\"from\":0,\"to\":15,\"direction\":\"forward\",\"color\":\"#000000ff\"}]",
+        "animation_spritesheet.png",
+        100,
+        "frame",
+        false,
+        "aseprite_animation_atlas",
+        "dancing",
+        0,
+        15,
+        "forward",
+        "#000000ff"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "LoadImage",
+      "pos": [
+        -2968.686984319367,
+        -442.8572150156295
+      ],
+      "size": [
+        282.798828125,
+        314
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            11
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.19.3",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "ComfyUI_temp_pdiac_00001_.png",
+        "image"
+      ]
+    },
+    {
+      "id": 15,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        -1247.392207790252,
+        -806.7461796680846
+      ],
+      "size": [
+        375.38491369161693,
+        703.3849136916169
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 71
+        },
+        {
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": null
+        },
+        {
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "1.7.9",
+        "Node name for S&R": "VHS_VideoCombine"
+      },
+      "widgets_values": {
+        "frame_rate": 3,
+        "loop_count": 0,
+        "filename_prefix": "AnimateDiff",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": false,
+        "pingpong": false,
+        "save_output": false,
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "AnimateDiff_00036.mp4",
+            "subfolder": "",
+            "type": "temp",
+            "format": "video/h264-mp4",
+            "frame_rate": 3,
+            "workflow": "AnimateDiff_00036.png",
+            "fullpath": "/home/victor/AI/Comfy/ComfyUI/temp/AnimateDiff_00036.mp4"
+          }
+        }
+      }
+    }
+  ],
+  "links": [
+    [
+      9,
+      7,
+      0,
+      2,
+      0,
+      "STRING"
+    ],
+    [
+      10,
+      2,
+      0,
+      8,
+      0,
+      "STRING"
+    ],
+    [
+      11,
+      9,
+      0,
+      10,
+      0,
+      "IMAGE"
+    ],
+    [
+      12,
+      8,
+      0,
+      10,
+      2,
+      "STRING"
+    ],
+    [
+      19,
+      10,
+      0,
+      16,
+      0,
+      "IMAGE"
+    ],
+    [
+      25,
+      10,
+      0,
+      11,
+      0,
+      "IMAGE"
+    ],
+    [
+      44,
+      7,
+      0,
+      11,
+      1,
+      "STRING"
+    ],
+    [
+      71,
+      11,
+      0,
+      15,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.8916327337954592,
+      "offset": [
+        4336.475631887293,
+        1140.2809521287154
+      ]
+    },
+    "frontendVersion": "1.42.15",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

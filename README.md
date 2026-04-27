@@ -2,6 +2,29 @@
 
 Custom ComfyUI nodes for game asset preparation workflows.
 
+## Installation
+
+1. Navigate to your ComfyUI `custom_nodes` directory:
+
+```bash
+cd /path/to/ComfyUI/custom_nodes
+```
+
+2. Clone this repository:
+
+```bash
+git clone https://github.com/YOUR_USERNAME/ComfyUI-GameAssetsMaker.git
+```
+
+3. Install dependencies:
+
+```bash
+cd ComfyUI-GameAssetsMaker
+pip install -r requirements.txt
+```
+
+4. Restart ComfyUI.
+
 ## Nodes
 
 ### Aseprite Visual Novel Atlas
@@ -10,7 +33,7 @@ Generates an Aseprite-compatible JSON atlas for visual novel character spriteshe
 
 Set the spritesheet width/height, choose **Half Body**, **Full Body**, or **Face Expressions**, then set the sprite count. The frontend adds one name field per sprite and stores those names in the atlas frame keys, such as `neutral.png`, `happy.png`, or `angry.png`.
 
-Use `layout_direction` to choose **Horizontal**, **Vertical**, or **Grid**. Horizontal places all sprites in one row, Vertical places all sprites in one column, and Grid uses `columns` to calculate the rows. The node validates that the sheet divides evenly into uniform frames. The output JSON uses Aseprite's hash format with `frames` coordinates and `meta.image` pointing at `image_filename`.
+Use `layout_direction` to choose **Horizontal**, **Vertical**, or **Grid**. Horizontal places all sprites in one row, Vertical places all sprites in one column, and Grid balances the layout automatically when `columns` is `0` (`4 -> 2x2`, `6 -> 3x2`, `9 -> 3x3`). Set `columns` above `0` to force a manual grid. The node validates that the sheet divides evenly into uniform frames. The output JSON uses Aseprite's hash format with `frames` coordinates and `meta.image` pointing at `image_filename`.
 
 ### Aseprite Atlas Sprite Preview
 
@@ -39,6 +62,18 @@ Set the spritesheet size, total `frame_count`, layout direction, and animation t
 Receives a spritesheet image and an Aseprite JSON atlas with `meta.frameTags`, then extracts the selected animation as an `IMAGE` batch.
 
 Set `animation_name` to one of the frame tag names. The node resolves `forward`, `reverse`, and `pingpong` playback order, repeats it with `loop_count`, and outputs `frame_delay_ms` from the atlas frame durations. Connect `animation_frames` to **Preview Image** or to an animated WebP/GIF/video saver node.
+
+### Aseprite VLM Audit Prompt
+
+Builds a strict JSON-only prompt for a vision-language model to inspect a generated spritesheet and correct Aseprite frame rectangles.
+
+Connect the generated spritesheet image and either a visual novel atlas JSON or an animation atlas JSON. Send the output image plus `vlm_prompt` into any VLM node that accepts image + text and returns text.
+
+### Aseprite Apply VLM Correction
+
+Applies the VLM's JSON response to the original Aseprite atlas.
+
+The VLM response can be either a list of frame rectangles or a full `frames` object. The node clamps rectangles to the actual image size, preserves existing frame names when possible, updates `meta.size`, and returns a corrected Aseprite JSON. This works for both visual novel atlases and animation atlases.
 
 ### SeeThrough Parts To SVG Paths
 

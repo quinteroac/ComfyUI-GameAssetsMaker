@@ -194,6 +194,8 @@ def _build_aseprite_atlas(
         columns = sprite_count
     elif layout_direction == "Vertical":
         columns = 1
+    elif layout_direction == "Grid" and columns <= 0:
+        columns = _balanced_grid_columns(sprite_count)
     elif columns <= 0:
         columns = sprite_count
 
@@ -245,6 +247,20 @@ def _build_aseprite_atlas(
         },
     }
     return atlas
+
+
+def _balanced_grid_columns(item_count):
+    item_count = max(1, int(item_count))
+    best_columns = item_count
+    best_score = None
+    for columns in range(1, item_count + 1):
+        rows = int(math.ceil(item_count / columns))
+        empty_cells = columns * rows - item_count
+        score = (empty_cells, abs(columns - rows), -columns)
+        if best_score is None or score < best_score:
+            best_score = score
+            best_columns = columns
+    return best_columns
 
 
 def _load_aseprite_atlas(aseprite_json):
@@ -488,6 +504,194 @@ def _animation_frame_indexes(tag, frame_count, loop_count=1, include_pingpong_en
 
     loop_count = max(1, int(loop_count))
     return indexes * loop_count
+
+
+def _image_tensor_size(image, image_index=0):
+    if not isinstance(image, torch.Tensor) or image.ndim != 4:
+        raise ValueError("Expected IMAGE tensor with shape [batch, height, width, channels]")
+    batch_index = max(0, min(int(image_index), image.shape[0] - 1))
+    return int(image[batch_index].shape[1]), int(image[batch_index].shape[0]), batch_index
+
+
+def _json_excerpt(value, limit=6000):
+    text = str(value or "")
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n...TRUNCATED..."
+
+
+def _build_aseprite_vlm_audit_prompt(atlas, image_width, image_height, atlas_kind):
+    frame_items = _aseprite_frame_items(atlas)
+    tags = _aseprite_frame_tags(atlas)
+    current_frames = [
+        {"name": item["name"], "x": item["x"], "y": item["y"], "w": item["w"], "h": item["h"]}
+        for item in frame_items
+    ]
+    prompt_payload = {
+        "task": "Inspect the provided spritesheet image and correct the Aseprite JSON frame rectangles.",
+        "atlas_kind": atlas_kind,
+        "image_size": {"w": image_width, "h": image_height},
+        "current_frames": current_frames,
+        "current_frame_tags": tags,
+        "rules": [
+            "Return only JSON. No markdown, no explanation.",
+            "Do not invent new animation names or expression names unless a frame is truly missing a usable name.",
+            "Keep the same frame order as current_frames whenever possible.",
+            "Coordinates are pixel rectangles in image space: x, y, w, h.",
+            "All rectangles must stay inside image_size.",
+            "If the current JSON is already correct, return the same rectangles.",
+            "For visual_novel atlases, frames may be expressions or character states.",
+            "For animation atlases, frames are sequential animation frames and frameTags define ranges.",
+        ],
+        "response_schema": {
+            "frames": [
+                {"name": "existing_frame_name.png", "x": 0, "y": 0, "w": 256, "h": 256}
+            ],
+            "layout": {
+                "direction": "Horizontal | Vertical | Grid | Unknown",
+                "columns": 1,
+                "rows": 1,
+            },
+            "frameTags": tags,
+            "notes": ["short correction note"],
+        },
+    }
+    return json.dumps(prompt_payload, indent=2, ensure_ascii=False)
+
+
+def _extract_json_object(text):
+    text = str(text or "").strip()
+    if not text:
+        raise ValueError("VLM response is empty")
+    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
+    if fenced:
+        text = fenced.group(1).strip()
+    if not text.startswith("{"):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            text = text[start : end + 1]
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Could not parse VLM response as JSON: {error}") from error
+    if not isinstance(parsed, dict):
+        raise ValueError("VLM response JSON must be an object")
+    return parsed
+
+
+def _vlm_frames_from_response(vlm_data):
+    frames = vlm_data.get("frames")
+    if isinstance(frames, list):
+        parsed = []
+        for index, frame in enumerate(frames):
+            if not isinstance(frame, dict):
+                continue
+            name = str(frame.get("name") or frame.get("filename") or f"frame_{index + 1:02d}.png")
+            try:
+                parsed.append(
+                    {
+                        "name": name,
+                        "x": int(frame["x"]),
+                        "y": int(frame["y"]),
+                        "w": int(frame["w"]),
+                        "h": int(frame["h"]),
+                    }
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"Invalid VLM frame rectangle at index {index}") from error
+        return parsed
+    if isinstance(frames, dict):
+        parsed = []
+        for name, frame_data in frames.items():
+            if not isinstance(frame_data, dict):
+                continue
+            rect = frame_data.get("frame", frame_data)
+            if not isinstance(rect, dict):
+                continue
+            try:
+                parsed.append(
+                    {
+                        "name": str(name),
+                        "x": int(rect["x"]),
+                        "y": int(rect["y"]),
+                        "w": int(rect["w"]),
+                        "h": int(rect["h"]),
+                    }
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(f"Invalid VLM frame rectangle for {name}") from error
+        return parsed
+    raise ValueError("VLM response must include frames as a list or object")
+
+
+def _clamp_frame_rect(frame, image_width, image_height):
+    x = max(0, min(int(frame["x"]), image_width - 1))
+    y = max(0, min(int(frame["y"]), image_height - 1))
+    w = max(1, int(frame["w"]))
+    h = max(1, int(frame["h"]))
+    if x + w > image_width:
+        w = image_width - x
+    if y + h > image_height:
+        h = image_height - y
+    return {"name": frame["name"], "x": x, "y": y, "w": max(1, w), "h": max(1, h)}
+
+
+def _apply_vlm_aseprite_correction(atlas, vlm_response, image_width, image_height):
+    corrected = deepcopy(atlas)
+    current_items = _aseprite_frame_items(corrected)
+    vlm_data = _extract_json_object(vlm_response)
+    vlm_frames = [_clamp_frame_rect(frame, image_width, image_height) for frame in _vlm_frames_from_response(vlm_data)]
+    if not vlm_frames:
+        raise ValueError("VLM response did not include any usable frames")
+
+    current_names = [item["name"] for item in current_items]
+    name_set = set(current_names)
+    use_index_mapping = len(vlm_frames) == len(current_items)
+    updated_frames = {}
+    changed = []
+
+    for index, vlm_frame in enumerate(vlm_frames):
+        frame_name = vlm_frame["name"]
+        if frame_name not in name_set and use_index_mapping:
+            frame_name = current_names[index]
+        old_frame_data = {}
+        if isinstance(corrected.get("frames"), dict):
+            old_frame_data = deepcopy(corrected["frames"].get(frame_name, {}))
+        old_rect = old_frame_data.get("frame", {})
+        new_rect = {"x": vlm_frame["x"], "y": vlm_frame["y"], "w": vlm_frame["w"], "h": vlm_frame["h"]}
+        old_frame_data["frame"] = new_rect
+        old_frame_data["rotated"] = bool(old_frame_data.get("rotated", False))
+        old_frame_data["trimmed"] = bool(old_frame_data.get("trimmed", False))
+        old_frame_data["spriteSourceSize"] = {"x": 0, "y": 0, "w": new_rect["w"], "h": new_rect["h"]}
+        old_frame_data["sourceSize"] = {"w": new_rect["w"], "h": new_rect["h"]}
+        old_frame_data["duration"] = int(old_frame_data.get("duration", 100))
+        updated_frames[frame_name] = old_frame_data
+        if old_rect != new_rect:
+            changed.append(frame_name)
+
+    corrected["frames"] = updated_frames
+    meta = corrected.setdefault("meta", {})
+    meta["size"] = {"w": image_width, "h": image_height}
+    layout = vlm_data.get("layout")
+    if isinstance(layout, dict):
+        frame_widths = [frame_data["frame"]["w"] for frame_data in updated_frames.values()]
+        frame_heights = [frame_data["frame"]["h"] for frame_data in updated_frames.values()]
+        frame_width = frame_widths[0] if len(set(frame_widths)) == 1 else max(frame_widths)
+        frame_height = frame_heights[0] if len(set(frame_heights)) == 1 else max(frame_heights)
+        meta["layout"] = {
+            **meta.get("layout", {}),
+            "direction": str(layout.get("direction", meta.get("layout", {}).get("direction", "Unknown"))),
+            "columns": int(layout.get("columns", meta.get("layout", {}).get("columns", 1)) or 1),
+            "rows": int(layout.get("rows", meta.get("layout", {}).get("rows", 1)) or 1),
+            "spriteCount": len(updated_frames),
+            "frameWidth": int(frame_width),
+            "frameHeight": int(frame_height),
+        }
+    frame_tags = vlm_data.get("frameTags")
+    if isinstance(frame_tags, list):
+        meta["frameTags"] = frame_tags
+    return corrected, changed, vlm_data
 
 
 def _contour_to_path(contour, offset_x, offset_y, close_path=True):
@@ -2375,6 +2579,113 @@ class GameAssets_AsepriteAnimationPreview:
         return (animation_frames, "\n".join(names), frame_delay_ms, report)
 
 
+class GameAssets_AsepriteVLMAuditPrompt:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "spritesheet": ("IMAGE",),
+                "aseprite_json": ("STRING", {"default": "", "multiline": True}),
+                "atlas_kind": (["Auto", "Visual Novel", "Animation"], {"default": "Auto"}),
+                "image_index": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "STRING", "STRING")
+    RETURN_NAMES = ("spritesheet", "vlm_prompt", "report")
+    FUNCTION = "build"
+    CATEGORY = "Game Assets/Aseprite"
+
+    def build(self, spritesheet, aseprite_json, atlas_kind="Auto", image_index=0):
+        atlas = _load_aseprite_atlas(aseprite_json)
+        image_width, image_height, batch_index = _image_tensor_size(spritesheet, image_index)
+        if atlas_kind == "Auto":
+            meta = atlas.get("meta", {})
+            atlas_kind = "Animation" if meta.get("frameTags") or meta.get("atlasType") == "Animation" else "Visual Novel"
+        prompt = _build_aseprite_vlm_audit_prompt(atlas, image_width, image_height, atlas_kind)
+        report = "\n".join(
+            [
+                "Aseprite VLM audit prompt",
+                f"atlas kind: {atlas_kind}",
+                f"image index: {batch_index}",
+                f"image size: {image_width}x{image_height}",
+                f"frames: {len(_aseprite_frame_items(atlas))}",
+                "Send the image output and vlm_prompt to a VLM node, then connect the VLM text response to Apply VLM Correction.",
+            ]
+        )
+        return (spritesheet, prompt, report)
+
+
+class GameAssets_AsepriteApplyVLMCorrection:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "spritesheet": ("IMAGE",),
+                "aseprite_json": ("STRING", {"default": "", "multiline": True}),
+                "vlm_response": ("STRING", {"default": "", "multiline": True}),
+                "image_index": ("INT", {"default": 0, "min": 0, "max": 4096, "step": 1}),
+                "save_json": ("BOOLEAN", {"default": True}),
+                "filename_prefix": ("STRING", {"default": "aseprite_vlm_corrected"}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "STRING")
+    RETURN_NAMES = ("corrected_aseprite_json", "json_path", "report")
+    FUNCTION = "apply"
+    CATEGORY = "Game Assets/Aseprite"
+    OUTPUT_NODE = True
+
+    def apply(
+        self,
+        spritesheet,
+        aseprite_json,
+        vlm_response,
+        image_index=0,
+        save_json=True,
+        filename_prefix="aseprite_vlm_corrected",
+    ):
+        atlas = _load_aseprite_atlas(aseprite_json)
+        image_width, image_height, batch_index = _image_tensor_size(spritesheet, image_index)
+        corrected, changed, vlm_data = _apply_vlm_aseprite_correction(
+            atlas,
+            vlm_response,
+            image_width,
+            image_height,
+        )
+        corrected_json = json.dumps(corrected, indent=2, ensure_ascii=False)
+
+        json_path = ""
+        if save_json:
+            output_dir = folder_paths.get_output_directory()
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            suffix = str(uuid.uuid4())[:8]
+            safe_prefix = _safe_filename_stem(filename_prefix, "aseprite_vlm_corrected")
+            json_filename = f"{safe_prefix}_{timestamp}_{suffix}.json"
+            json_path = os.path.join(output_dir, json_filename)
+            with open(json_path, "w", encoding="utf-8") as json_file:
+                json_file.write(corrected_json)
+
+        notes = vlm_data.get("notes", [])
+        if isinstance(notes, list):
+            notes_text = "; ".join(str(note) for note in notes) if notes else "none"
+        else:
+            notes_text = str(notes)
+        report = "\n".join(
+            [
+                "Aseprite VLM correction",
+                f"image index: {batch_index}",
+                f"image size: {image_width}x{image_height}",
+                f"frames changed: {len(changed)}",
+                f"changed ids: {', '.join(changed) if changed else 'none'}",
+                f"notes: {notes_text}",
+                f"json: {json_path or 'not saved'}",
+            ]
+        )
+        print(f"[GameAssetsMaker] Applied VLM correction to {len(changed)} Aseprite frames", flush=True)
+        return (corrected_json, json_path, report)
+
+
 NODE_CLASS_MAPPINGS = {
     "GameAssets_SeeThroughPartsToSVGPaths": GameAssets_SeeThroughPartsToSVGPaths,
     "GameAssets_SeeThroughPartsRigProbe": GameAssets_SeeThroughPartsRigProbe,
@@ -2387,6 +2698,8 @@ NODE_CLASS_MAPPINGS = {
     "GameAssets_AsepriteAnimationTags": GameAssets_AsepriteAnimationTags,
     "GameAssets_AsepriteAnimationAtlas": GameAssets_AsepriteAnimationAtlas,
     "GameAssets_AsepriteAnimationPreview": GameAssets_AsepriteAnimationPreview,
+    "GameAssets_AsepriteVLMAuditPrompt": GameAssets_AsepriteVLMAuditPrompt,
+    "GameAssets_AsepriteApplyVLMCorrection": GameAssets_AsepriteApplyVLMCorrection,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -2401,4 +2714,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "GameAssets_AsepriteAnimationTags": "Aseprite Animation Tags",
     "GameAssets_AsepriteAnimationAtlas": "Aseprite Animation Atlas",
     "GameAssets_AsepriteAnimationPreview": "Aseprite Animation Preview",
+    "GameAssets_AsepriteVLMAuditPrompt": "Aseprite VLM Audit Prompt",
+    "GameAssets_AsepriteApplyVLMCorrection": "Aseprite Apply VLM Correction",
 }
